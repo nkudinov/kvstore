@@ -44,6 +44,7 @@ public class WALService {
         return crc32.getValue();
     }
 
+
     public void write(KVEntity kvEntity) throws IOException {
         write(kvEntity.getKey(), kvEntity.getVal());
     }
