@@ -4,6 +4,7 @@ package com.zalando.de.kvstore.web;
 import com.zalando.de.kvstore.core.KVEntity;
 import com.zalando.de.kvstore.core.KVStore;
 import com.zalando.de.kvstore.service.WALService;
+import com.zalando.de.kvstore.service.WALService2;
 import com.zalando.de.kvstore.wal.WAL;
 import java.io.IOException;
 import java.util.Optional;
@@ -20,11 +21,11 @@ import org.springframework.web.bind.annotation.RestController;
 public class KVController {
 
     private KVStore store = new KVStore();
-    private WALService wal = new WALService();
+    private WALService2 wal = new WALService2();
 
     public KVController() throws IOException {
       if (wal.exists()) {
-          for (KVEntity entity : wal.recovery()) {
+          for (KVEntity entity : wal.recover()) {
               store.put(entity);
           }
       }
@@ -40,7 +41,7 @@ public class KVController {
     @PutMapping("/{key}")
     ResponseEntity<String> put(@PathVariable String key, @RequestBody String val) throws IOException {
         KVEntity kvEntity = KVEntity.builder().key(key).val(val).build();
-        wal.write(kvEntity);
+        wal.write(kvEntity.getKey(), kvEntity.getVal());
         store.put(kvEntity);
         return ResponseEntity.ok("ack");
     }

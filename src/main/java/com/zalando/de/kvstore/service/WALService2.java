@@ -4,9 +4,12 @@ import com.zalando.de.kvstore.core.KVEntity;
 import java.io.ByteArrayOutputStream;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
+import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.RandomAccessFile;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.BlockingQueue;
@@ -16,11 +19,13 @@ import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.zip.CRC32;
 
-public class WAL {
+public class WALService2 implements WALInterface {
 
     private static final int MAGIC_NUMBER = 0xCAFEBABE;
     private static final int BATCH_SIZE = 10;
     private static final long POLL_TIMEOUT = 10; // Microseconds
+    public static final int TIMEOUT = 10;
+    public static final String WAL_LOG = "wal.log";
 
     private final BlockingQueue<KVEntity> buffer;
     private final Lock lock;
@@ -28,17 +33,17 @@ public class WAL {
     private final Thread worker;
     private volatile boolean running = true; // Graceful shutdown flag
 
-    public WAL() throws IOException {
+    public WALService2() throws IOException {
         this.buffer = new LinkedBlockingQueue<>();
         this.lock = new ReentrantLock();
-        this.raf = new RandomAccessFile("wal.log", "rw");
-
+        this.raf = new RandomAccessFile(WAL_LOG, "rw");
+        raf.seek(raf.length());
         worker = new Thread(() -> {
             while (running) {
                 List<KVEntity> list = new ArrayList<>();
                 try {
                     // Poll first entity
-                    KVEntity entity = buffer.poll(POLL_TIMEOUT, TimeUnit.MICROSECONDS);
+                    KVEntity entity = buffer.poll(TIMEOUT, TimeUnit.MICROSECONDS);
                     if (entity != null) {
                         list.add(entity);
                         // Try draining up to BATCH_SIZE
@@ -89,14 +94,42 @@ public class WAL {
         return crc32.getValue();
     }
 
+    @Override
     public void write(String key, String val) {
         buffer.add(KVEntity.builder().key(key).val(val).build());
     }
 
+    @Override
     public void shutdown() {
         running = false;
         worker.interrupt(); // Stop the worker thread gracefully
     }
 
+    @Override
+    public boolean exists() {
+        return Files.exists(Paths.get(WAL_LOG));
+    }
 
+    @Override
+    public List<KVEntity> recover() throws IOException {
+        List<KVEntity> res = new ArrayList<>();
+        try (DataInputStream dataInputStream = new DataInputStream(new FileInputStream(WAL_LOG))) {
+            while (dataInputStream.available() > 0) {  // Read until EOF
+                int magicNumber = dataInputStream.readInt();
+                if (magicNumber != MAGIC_NUMBER) {
+                    throw new IOException("Corrupt WAL: Invalid magic number.");
+                }
+                long crc = dataInputStream.readLong();
+                String key = dataInputStream.readUTF();
+                String val = dataInputStream.readUTF();
+                KVEntity entity = KVEntity.builder().key(key).val(val).build();
+                if (crc != calculateChecksum(key.getBytes(StandardCharsets.UTF_8),
+                    val.getBytes(StandardCharsets.UTF_8))) {
+                    throw new IOException("Corrupt WAL: Checksum mismatch.");
+                }
+                res.add(entity);
+            }
+        }
+        return res;
+    }
 }
