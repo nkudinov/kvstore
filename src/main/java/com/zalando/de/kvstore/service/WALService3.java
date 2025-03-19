@@ -14,6 +14,9 @@ import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.zip.CRC32;
@@ -23,12 +26,41 @@ public class WALService3 implements WALInterface {
     public static final int RECORD_BEGIN = 0xDEADDEAD;
     private static String FILE_NAME = "wal.log";
     private RandomAccessFile raf;
+
+    private BlockingQueue<KVEntity> buffer;
+
     private Lock lock;
+
+    private Thread worker;
+
+    private AtomicBoolean isRunning;
 
     public WALService3() throws IOException {
         raf = new RandomAccessFile(FILE_NAME, "rw");
         raf.seek(raf.length());
         lock = new ReentrantLock();
+        buffer = new LinkedBlockingQueue<>();
+        isRunning = new AtomicBoolean(true);
+        worker = new Thread() {
+            @Override
+            public void run() {
+                while (isRunning.get()) {
+                    KVEntity kvEntity = null;
+                    try {
+                        kvEntity = buffer.take();
+                    } catch (InterruptedException e) {
+                        throw new RuntimeException(e);
+                    }
+                    try {
+                        assert kvEntity != null;
+                        internalWrite(kvEntity.getKey(), kvEntity.getVal());
+                    } catch (IOException e) {
+                        throw new RuntimeException(e);
+                    }
+                }
+            }
+        };
+        worker.start();
     }
 
     private long crcSum(String key, String val) {
@@ -40,6 +72,11 @@ public class WALService3 implements WALInterface {
 
     @Override
     public void write(String key, String val) throws IOException {
+        buffer.add(KVEntity.builder().key(key).val(val).build());
+    }
+
+
+    public void internalWrite(String key, String val) throws IOException {
         lock.lock();
         try {
             try (ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
