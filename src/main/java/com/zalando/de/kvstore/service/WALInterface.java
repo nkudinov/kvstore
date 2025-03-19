@@ -6,9 +6,9 @@ import java.util.List;
 
 public interface WALInterface {
 
-    void write(String key, String val);
+    void write(String key, String val) throws IOException;
 
-    void shutdown();
+    void shutdown() throws IOException;
 
     boolean exists();
 
