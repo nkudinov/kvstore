@@ -3,9 +3,11 @@ package com.zalando.de.kvstore.web;
 
 import com.zalando.de.kvstore.core.KVEntity;
 import com.zalando.de.kvstore.core.KVStore;
+import com.zalando.de.kvstore.service.WALInterface;
 import com.zalando.de.kvstore.service.WALService;
 import com.zalando.de.kvstore.service.WALService2;
 import com.zalando.de.kvstore.service.WALService3;
+import com.zalando.de.kvstore.service.WALService5;
 import java.io.IOException;
 import java.util.Optional;
 import org.springframework.http.ResponseEntity;
@@ -21,7 +23,7 @@ import org.springframework.web.bind.annotation.RestController;
 public class KVController {
 
     private KVStore store = new KVStore();
-    private WALService3 wal = new WALService3();
+    private WALInterface wal = WALService5.getInstance();
 
     public KVController() throws IOException {
       if (wal.exists()) {

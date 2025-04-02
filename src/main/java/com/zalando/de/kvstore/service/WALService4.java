@@ -13,15 +13,16 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
+import java.util.zip.CRC32;
 
 public class WALService4 implements WALInterface {
 
     @Override
     public void write(String key, String val) throws IOException {
-
+        write2(key, val);
     }
 
-    public static final int RECORD_START = 0XBEBEBEBE;
+    public static final int RECORD_START = 0xDEADDEAD;
     public static final String WAL_LOG = "wal.log";
 
     static class WALEntity {
@@ -76,12 +77,18 @@ public class WALService4 implements WALInterface {
         writer.start();
     }
 
+    private long crc(byte[] a1, byte[] a2) {
+        CRC32 crc32 = new CRC32();
+        crc32.update(a1);
+        crc32.update(a2);
+        return crc32.getValue();
+    }
     private void writeToFile(List<WALEntity> records) throws IOException {
         try (ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
             DataOutputStream dataOutputStream = new DataOutputStream(byteArrayOutputStream)) {
             for (WALEntity walEntity : records) {
                 dataOutputStream.writeInt(RECORD_START);
-                dataOutputStream.writeLong(walEntity.logNumber);
+                dataOutputStream.writeLong(crc(walEntity.key.getBytes(), walEntity.val.getBytes()));
                 dataOutputStream.writeUTF(walEntity.key);
                 dataOutputStream.writeUTF(walEntity.val);
             }
@@ -106,7 +113,7 @@ public class WALService4 implements WALInterface {
 
     @Override
     public void shutdown() throws IOException {
-         isRunning.set(false);
+        isRunning.set(false);
         try {
             writer.join();
         } catch (InterruptedException e) {
