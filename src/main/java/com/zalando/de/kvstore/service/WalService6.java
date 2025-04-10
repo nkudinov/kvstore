@@ -16,112 +16,125 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.zip.CRC32;
+import lombok.extern.slf4j.Slf4j;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
+@Slf4j
 public class WalService6 implements WALInterface {
+    private static final Logger logger = LoggerFactory.getLogger(WalService6.class);
 
-    static class WALRecord {
-
-        private String key;
-        private String val;
-
+    private static class WALRecord {
+        final String key;
+        final String val;
         final CompletableFuture<Void> future = new CompletableFuture<>();
 
-        public WALRecord(String key, String val) {
+        WALRecord(String key, String val) {
             this.key = key;
             this.val = val;
         }
     }
 
     public static final int MAGIC_NUMBER = 0xBEBEBEBE;
-    Lock lock;
-    RandomAccessFile raf;
+    public static final String WAL_LOG = "wal.log";
 
-    BlockingQueue<WALRecord> queue;
-    final Thread worker;
-    private final AtomicBoolean isRunning;
+    private final RandomAccessFile raf;
+    private final Lock writeLock = new ReentrantLock();
+
+    private final BlockingQueue<WALRecord> queue = new LinkedBlockingQueue<>();
+    private final AtomicBoolean running = new AtomicBoolean(true);
+    private final Thread worker;
 
     public WalService6() throws IOException {
-        lock = new ReentrantLock();
-        raf = new RandomAccessFile(WAL_LOG, "rw");
-        raf.seek(raf.length());
-        queue = new LinkedBlockingQueue<>();
-        isRunning = new AtomicBoolean(true);
-        worker = new Thread() {
-            @Override
-            public void run() {
-                while (isRunning.get()) {
-                    WALRecord walRecord = null;
-                    try {
-                        walRecord = queue.take();
-                    } catch (InterruptedException e) {
-                        throw new RuntimeException(e);
-                    }
-                    try {
-                        writeToDisk(walRecord.key, walRecord.val);
-                    } catch (IOException e) {
-                        throw new RuntimeException(e);
-                    }
-                    walRecord.future.complete(null);
-                }
-            }
-        };
-        worker.start();
+        this.raf = new RandomAccessFile(WAL_LOG, "rw");
+        this.raf.seek(raf.length());
+
+        this.worker = new Thread(this::runWorker, "wal-writer-thread");
+        this.worker.start();
+        logger.info("WAL service initialized.");
     }
 
-    public static final String WAL_LOG = "wal.log";
+    private void runWorker() {
+        while (running.get() || !queue.isEmpty()) {
+            WALRecord record = null;
+            try {
+                record = queue.poll(100, TimeUnit.MILLISECONDS);
+                if (record == null) continue;
+
+                writeToDisk(record);
+                record.future.complete(null);
+            } catch (Exception e) {
+                if (record != null) {
+                    record.future.completeExceptionally(e);
+                }
+                logger.error("Failed to write WAL record", e);
+            }
+        }
+
+        logger.info("WAL writer thread stopped.");
+    }
 
     @Override
     public void write(String key, String val) throws IOException {
-        WALRecord walRecord = new WALRecord(key, val);
-        queue.offer(walRecord); // enqueue for background writing
+        WALRecord record = new WALRecord(key, val);
+        queue.offer(record);
+
         try {
-            walRecord.future.join(); // wait until it's written
-        } catch (Exception e) {
-            throw new IOException("WAL write failed", e);
+            record.future.join();
+        } catch (CompletionException e) {
+            throw new IOException("WAL write failed", e.getCause());
         }
     }
 
+    private void writeToDisk(WALRecord record) throws IOException {
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        try (DataOutputStream dos = new DataOutputStream(baos)) {
+            dos.writeInt(MAGIC_NUMBER);
+            dos.writeLong(crc32(record.key.getBytes(), record.val.getBytes()));
+            dos.writeUTF(record.key);
+            dos.writeUTF(record.val);
+        }
 
-    private void writeToDisk(String key, String val) throws IOException {
-        lock.lock();
+        writeLock.lock();
         try {
-            try (ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
-                DataOutputStream dataOutputStream = new DataOutputStream(byteArrayOutputStream)) {
-                dataOutputStream.writeInt(MAGIC_NUMBER);
-                dataOutputStream.writeLong(crc32(key.getBytes(), val.getBytes()));
-                dataOutputStream.writeUTF(key);
-                dataOutputStream.writeUTF(val);
-                raf.write(byteArrayOutputStream.toByteArray());
-                raf.getFD().sync();
-            }
+            raf.write(baos.toByteArray());
+            raf.getFD().sync();
         } finally {
-            lock.unlock();
+            writeLock.unlock();
         }
     }
 
-    private long crc32(byte[] b1, byte[] b2) {
-        CRC32 crc32 = new CRC32();
-        crc32.update(b1);
-        crc32.update(b2);
-        return crc32.getValue();
+    private long crc32(byte[] keyBytes, byte[] valBytes) {
+        CRC32 crc = new CRC32();
+        crc.update(keyBytes);
+        crc.update(valBytes);
+        return crc.getValue();
     }
 
     @Override
     public void shutdown() throws IOException {
-        lock.lock();
+        logger.info("Shutting down WAL service...");
+        running.set(false);
         try {
-            isRunning.set(false);
-            worker.interrupt();
-            if (raf != null) {
-                raf.close();
-            }
+            worker.join();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            logger.warn("Interrupted while waiting for WAL worker to stop");
+        }
+
+        writeLock.lock();
+        try {
+            raf.close();
+            logger.info("WAL file closed.");
         } finally {
-            lock.unlock();
+            writeLock.unlock();
         }
     }
 
@@ -132,26 +145,30 @@ public class WalService6 implements WALInterface {
 
     @Override
     public List<KVEntity> recover() throws IOException {
-        List<KVEntity> res = new ArrayList<>();
-        try (DataInputStream bufferedInputStream = new DataInputStream(new FileInputStream(WAL_LOG))) {
+        List<KVEntity> result = new ArrayList<>();
+
+        try (DataInputStream in = new DataInputStream(new BufferedInputStream(new FileInputStream(WAL_LOG)))) {
             while (true) {
                 try {
-                    if (bufferedInputStream.readInt() != MAGIC_NUMBER) {
-                        continue;
+                    int magic = in.readInt();
+                    if (magic != MAGIC_NUMBER) continue;
+
+                    long crc = in.readLong();
+                    String key = in.readUTF();
+                    String val = in.readUTF();
+
+                    if (crc == crc32(key.getBytes(), val.getBytes())) {
+                        result.add(KVEntity.builder().key(key).val(val).build());
+                    } else {
+                        logger.warn("Corrupt WAL record skipped: key='{}'", key);
                     }
-                    long crc = bufferedInputStream.readLong();
-                    String key = bufferedInputStream.readUTF();
-                    String val = bufferedInputStream.readUTF();
-                    if (crc != crc32(key.getBytes(), val.getBytes())) {
-                        continue;
-                    }
-                    res.add(KVEntity.builder().key(key).val(val).build());
                 } catch (EOFException e) {
                     break;
                 }
             }
-
         }
-        return res;
+
+        logger.info("WAL recovery completed with {} records.", result.size());
+        return result;
     }
 }
