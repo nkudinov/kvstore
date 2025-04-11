@@ -11,6 +11,7 @@ import com.zalando.de.kvstore.service.WALService5;
 import com.zalando.de.kvstore.service.WalService6;
 import java.io.IOException;
 import java.util.Optional;
+import java.util.concurrent.ExecutionException;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -42,10 +43,12 @@ public class KVController {
     }
 
     @PutMapping("/{key}")
-    ResponseEntity<String> put(@PathVariable String key, @RequestBody String val) throws IOException {
+    ResponseEntity<String> put(@PathVariable String key, @RequestBody String val)
+        throws IOException, ExecutionException, InterruptedException {
         KVEntity kvEntity = KVEntity.builder().key(key).val(val).build();
-        wal.write(kvEntity.getKey(), kvEntity.getVal());
+        var future = wal.write(kvEntity.getKey(), kvEntity.getVal());
         store.put(kvEntity);
+        future.get();
         return ResponseEntity.ok("ack");
     }
 }

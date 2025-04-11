@@ -17,6 +17,7 @@ import java.util.List;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
+import java.util.concurrent.Future;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
@@ -37,7 +38,7 @@ public class WalService6 implements WALInterface {
 
         final String key;
         final String val;
-        final Semaphore semaphore = new Semaphore(0);
+        final CompletableFuture<Void> future = new CompletableFuture<>();
 
         WALRecord(String key, String val) {
             this.key = key;
@@ -74,10 +75,10 @@ public class WalService6 implements WALInterface {
                 }
 
                 writeToDisk(record);
-                record.semaphore.release();
+                record.future.complete(null);
             } catch (Exception e) {
                 if (record != null) {
-                    record.semaphore.release();
+                    record.future.completeExceptionally(e);
                 }
                 logger.error("Failed to write WAL record", e);
             }
@@ -87,13 +88,12 @@ public class WalService6 implements WALInterface {
     }
 
     @Override
-    public void write(String key, String val) throws IOException {
+    public Future<Void> write(String key, String val) throws IOException {
         WALRecord record = new WALRecord(key, val);
         queue.offer(record);
-
         try {
-            record.semaphore.acquire();
-        } catch (CompletionException | InterruptedException e) {
+            return record.future;
+        } catch (CompletionException   e) {
             throw new IOException("WAL write failed", e.getCause());
         }
     }

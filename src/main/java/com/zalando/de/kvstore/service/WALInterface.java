@@ -3,10 +3,12 @@ package com.zalando.de.kvstore.service;
 import com.zalando.de.kvstore.core.KVEntity;
 import java.io.IOException;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Future;
 
 public interface WALInterface {
 
-    void write(String key, String val) throws IOException;
+    Future<Void> write(String key, String val) throws IOException;
 
     void shutdown() throws IOException;
 

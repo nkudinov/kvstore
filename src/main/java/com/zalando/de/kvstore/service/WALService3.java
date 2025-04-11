@@ -15,6 +15,8 @@ import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Future;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.locks.Lock;
@@ -71,8 +73,9 @@ public class WALService3 implements WALInterface {
     }
 
     @Override
-    public void write(String key, String val) throws IOException {
+    public Future<Void> write(String key, String val) throws IOException {
         buffer.add(KVEntity.builder().key(key).val(val).build());
+        return new CompletableFuture<>();
     }
 
 

@@ -8,6 +8,8 @@ import java.io.IOException;
 import java.io.RandomAccessFile;
 import java.util.List;
 import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Future;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -18,8 +20,9 @@ import java.util.zip.CRC32;
 public class WALService4 implements WALInterface {
 
     @Override
-    public void write(String key, String val) throws IOException {
+    public Future<Void> write(String key, String val) throws IOException {
         write2(key, val);
+        return new CompletableFuture<>();
     }
 
     public static final int RECORD_START = 0xDEADDEAD;
