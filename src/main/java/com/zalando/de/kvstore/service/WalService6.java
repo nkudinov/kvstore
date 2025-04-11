@@ -18,6 +18,7 @@ import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.locks.Lock;
@@ -29,12 +30,14 @@ import org.slf4j.LoggerFactory;
 
 @Slf4j
 public class WalService6 implements WALInterface {
+
     private static final Logger logger = LoggerFactory.getLogger(WalService6.class);
 
     private static class WALRecord {
+
         final String key;
         final String val;
-        final CompletableFuture<Void> future = new CompletableFuture<>();
+        final Semaphore semaphore = new Semaphore(0);
 
         WALRecord(String key, String val) {
             this.key = key;
@@ -66,13 +69,15 @@ public class WalService6 implements WALInterface {
             WALRecord record = null;
             try {
                 record = queue.poll(100, TimeUnit.MILLISECONDS);
-                if (record == null) continue;
+                if (record == null) {
+                    continue;
+                }
 
                 writeToDisk(record);
-                record.future.complete(null);
+                record.semaphore.release();
             } catch (Exception e) {
                 if (record != null) {
-                    record.future.completeExceptionally(e);
+                    record.semaphore.release();
                 }
                 logger.error("Failed to write WAL record", e);
             }
@@ -87,8 +92,8 @@ public class WalService6 implements WALInterface {
         queue.offer(record);
 
         try {
-            record.future.join();
-        } catch (CompletionException e) {
+            record.semaphore.acquire();
+        } catch (CompletionException | InterruptedException e) {
             throw new IOException("WAL write failed", e.getCause());
         }
     }
@@ -132,7 +137,6 @@ public class WalService6 implements WALInterface {
         writeLock.lock();
         try {
             raf.close();
-            logger.info("WAL file closed.");
         } finally {
             writeLock.unlock();
         }
@@ -151,7 +155,9 @@ public class WalService6 implements WALInterface {
             while (true) {
                 try {
                     int magic = in.readInt();
-                    if (magic != MAGIC_NUMBER) continue;
+                    if (magic != MAGIC_NUMBER) {
+                        continue;
+                    }
 
                     long crc = in.readLong();
                     String key = in.readUTF();
