@@ -16,14 +16,16 @@ import org.springframework.stereotype.Service;
 
 @Slf4j
 public class SnapshotService {
+
     private static final String SNAPSHOT_FILE = "snapshot.dat";
     private static final String TEMP_SNAPSHOT_FILE = "snapshot.tmp";
     private static final int MAGIC_HEADER = 0xCAFECAFE;
 
     private final KVStore kvStore;
     private final Lock lock;
+    private WALInterface walInterface;
 
-    public SnapshotService(KVStore kvStore, Lock lock) {
+    public SnapshotService(KVStore kvStore, Lock lock, WALInterface walInterface) {
         this.kvStore = kvStore;
         this.lock = lock;
     }
