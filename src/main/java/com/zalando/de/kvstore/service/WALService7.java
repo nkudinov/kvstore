@@ -67,10 +67,11 @@ public class WALService7 implements WALInterface {
                        log.info("waiting");
                         WALRecord walRecord = buffer.take();
                         processRecords(List.of(walRecord));
+                        walRecord.future.complete(null);
                     } catch (InterruptedException e) {
-                        if (!isRunning.get()) {
+
                             Thread.currentThread().interrupt();
-                        }
+
                     } catch (IOException e) {
                         throw new RuntimeException(e);
                     }
@@ -159,4 +160,5 @@ public class WALService7 implements WALInterface {
             throw new RuntimeException(e);
         }
     }
+
 }

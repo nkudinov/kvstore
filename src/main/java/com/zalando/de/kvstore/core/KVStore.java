@@ -1,5 +1,6 @@
 package com.zalando.de.kvstore.core;
 
+import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentSkipListMap;
@@ -12,7 +13,9 @@ public class KVStore {
         store = new ConcurrentHashMap<>();
 
     }
-
+    public Map<String,String> getStore(){
+        return store;
+    }
     public String put(String key, String value) {
         return store.put(key, value);
     }
