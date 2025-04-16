@@ -8,6 +8,7 @@ import com.zalando.de.kvstore.service.WALService;
 import com.zalando.de.kvstore.service.WALService2;
 import com.zalando.de.kvstore.service.WALService3;
 import com.zalando.de.kvstore.service.WALService5;
+import com.zalando.de.kvstore.service.WALService7;
 import com.zalando.de.kvstore.service.WalService6;
 import java.io.IOException;
 import java.util.Optional;
@@ -25,7 +26,7 @@ import org.springframework.web.bind.annotation.RestController;
 public class KVController {
 
     private KVStore store = new KVStore();
-    private WALInterface wal = new WalService6();
+    private WALInterface wal = new WALService7();
 
     public KVController() throws IOException {
         if (wal.exists()) {
