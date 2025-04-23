@@ -9,16 +9,22 @@ import java.io.FilterOutputStream;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.util.Map;
 import java.util.concurrent.locks.Lock;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 public class SnapshotService8 {
+    private static final Logger logger = Logger.getLogger(SnapshotService8.class.getName());
 
-    public static final String SNAPSHOT_TMP = "snapshot.tmp";
-    public static final String SNAPSHOT_LOG = "snapshot.log";
-    private Lock lock;
-    private WALInterface wal;
-    private KVStore kvStore;
+    private static final String SNAPSHOT_TMP = "snapshot.tmp";
+    private static final String SNAPSHOT_FILE = "snapshot.log";
+    private static final byte ENTRY_MARKER = 1;
+
+    private final Lock lock;
+    private final WALInterface wal;
+    private final KVStore kvStore;
 
     public SnapshotService8(Lock lock, WALInterface wal, KVStore kvStore) {
         this.lock = lock;
@@ -26,21 +32,37 @@ public class SnapshotService8 {
         this.kvStore = kvStore;
     }
 
-    public void take() {
+    public void takeSnapshot() {
         lock.lock();
-        try (DataOutputStream dataOutputStream = new DataOutputStream(
-            new BufferedOutputStream(new FileOutputStream(SNAPSHOT_TMP)))) {
-            dataOutputStream.writeLong(0L); // offset
-            for (Map.Entry<String, String> entry : kvStore.getStore().entrySet()) {
-                dataOutputStream.write();
-                dataOutputStream.writeUTF(entry.getKey());
-                dataOutputStream.writeUTF(entry.getValue());
-            }
-            Files.move(Path.of(SNAPSHOT_TMP), Path.of(SNAPSHOT_LOG));
+        try {
+            writeSnapshotToTempFile();
+            replaceOldSnapshot();
         } catch (IOException e) {
-            e.printStackTrace(); // Consider logging instead of printing in production
+            logger.log(Level.SEVERE, "Failed to take snapshot", e);
         } finally {
             lock.unlock();
         }
+    }
+
+    private void writeSnapshotToTempFile() throws IOException {
+        try (DataOutputStream out = new DataOutputStream(
+            new BufferedOutputStream(new FileOutputStream(SNAPSHOT_TMP)))) {
+
+            out.writeLong(0L); // offset placeholder
+
+            for (Map.Entry<String, String> entry : kvStore.getStore().entrySet()) {
+                out.writeByte(ENTRY_MARKER); // marks beginning of entry
+                out.writeUTF(entry.getKey());
+                out.writeUTF(entry.getValue());
+            }
+        }
+    }
+
+    private void replaceOldSnapshot() throws IOException {
+        Path tmpPath = Path.of(SNAPSHOT_TMP);
+        Path snapshotPath = Path.of(SNAPSHOT_FILE);
+
+        // Atomic move to avoid corrupted snapshot file
+        Files.move(tmpPath, snapshotPath, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
     }
 }

@@ -46,7 +46,7 @@ public class KVController {
             }
         }
         Runnable task = () -> {
-            snapshotService8.take();
+            snapshotService8.takeSnapshot();
         };
 
         long initialDelay = 0;
