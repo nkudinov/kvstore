@@ -11,9 +11,14 @@ import com.zalando.de.kvstore.service.WALService5;
 import com.zalando.de.kvstore.service.WALService7;
 import com.zalando.de.kvstore.service.WALService8;
 import com.zalando.de.kvstore.service.WalService6;
+import com.zalando.de.kvstore.snapshot.SnapshotService8;
 import java.io.IOException;
 import java.util.Optional;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 import org.springframework.http.ResponseEntity;
@@ -30,7 +35,9 @@ public class KVController {
 
     private Lock lock = new ReentrantLock();
     private KVStore store = new KVStore();
-    private WALInterface wal = new WALService8(lock , "wal.log");
+    private WALInterface wal = new WALService8(lock, "wal.log");
+    private SnapshotService8 snapshotService8 = new SnapshotService8(lock, wal, store);
+    ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
 
     public KVController() throws IOException {
         if (wal.exists()) {
@@ -38,7 +45,13 @@ public class KVController {
                 store.put(entity);
             }
         }
+        Runnable task = () -> {
+            snapshotService8.take();
+        };
 
+        long initialDelay = 0;
+        long period = 30;
+        scheduler.scheduleAtFixedRate(task, initialDelay, period, TimeUnit.MINUTES);
     }
 
     @GetMapping("/{key}")
