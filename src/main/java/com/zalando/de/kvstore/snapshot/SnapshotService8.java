@@ -55,6 +55,7 @@ public class SnapshotService8 {
                 out.writeUTF(entry.getKey());
                 out.writeUTF(entry.getValue());
             }
+            out.flush();
         }
     }
 
