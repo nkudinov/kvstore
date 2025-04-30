@@ -21,19 +21,16 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.locks.Lock;
 import java.util.zip.CRC32;
-import lombok.SneakyThrows;
 
 public class WalService9 implements WALInterface {
 
     public static final String WAL_LOG = "wal.log";
     public static final int RECORD_BEGIN = 0xCAFEBEBE;
 
-    private class WALEntry {
-
-        private final String key;
-        private final String val;
-
-        private final CompletableFuture<Void> future;
+    private static class WALEntry {
+        final String key;
+        final String val;
+        final CompletableFuture<Void> future;
 
         public WALEntry(String key, String val) {
             this.key = key;
@@ -43,9 +40,8 @@ public class WalService9 implements WALInterface {
     }
 
     private class Worker extends Thread {
-
-        private BlockingQueue<WALEntry> buffer;
-        private AtomicBoolean isRunning;
+        private final BlockingQueue<WALEntry> buffer;
+        private final AtomicBoolean isRunning;
 
         public Worker(String name, BlockingQueue<WALEntry> buffer, AtomicBoolean isRunning) {
             super(name);
@@ -53,19 +49,22 @@ public class WalService9 implements WALInterface {
             this.isRunning = isRunning;
         }
 
-        @SneakyThrows
         @Override
         public void run() {
-            while (isRunning.get()) {
-                WALEntry walEntry = null;
+            while (isRunning.get() || !buffer.isEmpty()) {
+                WALEntry walEntry;
                 try {
-                    walEntry = buffer.poll(1000, TimeUnit.MICROSECONDS);
-                } catch (InterruptedException e) {
-                    throw new RuntimeException(e);
-                }
-                if (walEntry != null) {
-                    write(walEntry);
-                    walEntry.future.complete(null);
+                    walEntry = buffer.poll(100, TimeUnit.MILLISECONDS);
+                    if (walEntry != null) {
+                        try {
+                            write(walEntry);
+                            walEntry.future.complete(null);
+                        } catch (Exception e) {
+                            walEntry.future.completeExceptionally(e);
+                        }
+                    }
+                } catch (InterruptedException ignored) {
+                    Thread.currentThread().interrupt();
                 }
             }
         }
@@ -75,12 +74,14 @@ public class WalService9 implements WALInterface {
         lock.lock();
         try (ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
             DataOutputStream dataOutputStream = new DataOutputStream(byteArrayOutputStream)) {
+
             dataOutputStream.writeInt(RECORD_BEGIN);
             dataOutputStream.writeLong(crc32(walEntry.key.getBytes(), walEntry.val.getBytes()));
             dataOutputStream.writeUTF(walEntry.key);
             dataOutputStream.writeUTF(walEntry.val);
             randomAccessFile.write(byteArrayOutputStream.toByteArray());
             randomAccessFile.getFD().sync();
+
         } finally {
             lock.unlock();
         }
@@ -97,6 +98,8 @@ public class WalService9 implements WALInterface {
     private final RandomAccessFile randomAccessFile;
     private final Lock lock;
     private final Thread worker;
+    private final AtomicBoolean isRunning;
+    private final BlockingQueue<WALEntry> buffer;
 
     public WalService9(Lock lock) throws FileNotFoundException {
         this.lock = lock;
@@ -104,13 +107,11 @@ public class WalService9 implements WALInterface {
         this.isRunning = new AtomicBoolean(true);
         this.randomAccessFile = new RandomAccessFile(WAL_LOG, "rw");
         this.worker = new Worker("wal-writer", buffer, isRunning);
+        this.worker.start(); /
     }
 
-    private final AtomicBoolean isRunning;
-    private final BlockingQueue<WALEntry> buffer;
-
     @Override
-    public Future<Void> write(String key, String val) throws IOException {
+    public Future<Void> write(String key, String val) {
         WALEntry walEntry = new WALEntry(key, val);
         buffer.add(walEntry);
         return walEntry.future;
@@ -121,9 +122,10 @@ public class WalService9 implements WALInterface {
         try {
             isRunning.set(false);
             worker.interrupt();
-            worker.join();
+            worker.join(); // Wait for graceful shutdown
         } catch (InterruptedException e) {
-            throw new RuntimeException(e);
+            Thread.currentThread().interrupt();
+            throw new RuntimeException("Interrupted during WAL shutdown", e);
         } finally {
             randomAccessFile.close();
         }
@@ -148,15 +150,15 @@ public class WalService9 implements WALInterface {
                     long crc = dataInputStream.readLong();
                     String key = dataInputStream.readUTF();
                     String val = dataInputStream.readUTF();
-                    if (crc != crc32(key.getBytes(), val.getBytes())) {
-                        continue;
+                    if (crc == crc32(key.getBytes(), val.getBytes())) {
+                        res.add(KVEntity.builder().key(key).val(val).build());
                     }
-                    res.add(KVEntity.builder().key(key).val(val).build());
-                } catch (EOFException ignored) {
-
+                } catch (EOFException eof) {
+                    break; // ✅ Properly exit loop
                 }
             }
 
         }
+        return res;
     }
 }
