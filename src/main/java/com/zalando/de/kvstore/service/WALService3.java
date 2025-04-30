@@ -126,4 +126,8 @@ public class WALService3 implements WALInterface {
         }
         return res;
     }
+    @Override
+    public long offset() throws IOException {
+        return raf.getFilePointer();
+    }
 }

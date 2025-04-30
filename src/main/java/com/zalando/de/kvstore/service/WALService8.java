@@ -161,4 +161,8 @@ public class WALService8 implements WALInterface {
         crc.update(value.getBytes());
         return crc.getValue();
     }
+    @Override
+    public long offset() throws IOException {
+        return logFile.getFilePointer();
+    }
 }

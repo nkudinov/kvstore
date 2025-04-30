@@ -24,6 +24,11 @@ import java.util.zip.CRC32;
 
 public class WalService9 implements WALInterface {
 
+    @Override
+    public long offset() throws IOException {
+        return randomAccessFile.getFilePointer();
+    }
+
     public static final String WAL_LOG = "wal.log";
     public static final int RECORD_BEGIN = 0xCAFEBEBE;
 
@@ -107,7 +112,7 @@ public class WalService9 implements WALInterface {
         this.isRunning = new AtomicBoolean(true);
         this.randomAccessFile = new RandomAccessFile(WAL_LOG, "rw");
         this.worker = new Worker("wal-writer", buffer, isRunning);
-        this.worker.start(); /
+        this.worker.start();
     }
 
     @Override

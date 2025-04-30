@@ -15,4 +15,6 @@ public interface WALInterface {
     boolean exists();
 
     List<KVEntity> recover() throws IOException;
+
+    public long offset() throws IOException;
 }

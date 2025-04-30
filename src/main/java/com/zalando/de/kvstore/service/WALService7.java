@@ -160,5 +160,8 @@ public class WALService7 implements WALInterface {
             throw new RuntimeException(e);
         }
     }
-
+    @Override
+    public long offset() throws IOException {
+        return raf.getFilePointer();
+    }
 }

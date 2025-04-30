@@ -177,4 +177,8 @@ public class WalService6 implements WALInterface {
         logger.info("WAL recovery completed with {} records.", result.size());
         return result;
     }
+    @Override
+    public long offset() throws IOException {
+        return raf.getFilePointer();
+    }
 }

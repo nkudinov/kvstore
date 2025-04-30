@@ -133,4 +133,8 @@ public class WALService4 implements WALInterface {
     public List<KVEntity> recover() throws IOException {
         return null;
     }
+    @Override
+    public long offset() throws IOException {
+        return raf.getFilePointer();
+    }
 }
