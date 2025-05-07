@@ -24,7 +24,7 @@ public class SimpleSnapsnotService9 {
     private final WALInterface wal;
     private final KVStore kvStore;
 
-    public SimpleSnapshotService9(Lock lock, WALInterface wal, KVStore kvStore) {
+    public SimpleSnapsnotService9(Lock lock, WALInterface wal, KVStore kvStore) {
         this.lock = lock;
         this.wal = wal;
         this.kvStore = kvStore;
