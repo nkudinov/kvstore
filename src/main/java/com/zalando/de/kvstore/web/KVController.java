@@ -10,6 +10,7 @@ import com.zalando.de.kvstore.service.WALService3;
 import com.zalando.de.kvstore.service.WALService5;
 import com.zalando.de.kvstore.service.WALService7;
 import com.zalando.de.kvstore.service.WALService8;
+import com.zalando.de.kvstore.service.WalService11;
 import com.zalando.de.kvstore.service.WalService6;
 import com.zalando.de.kvstore.service.WalService9;
 import com.zalando.de.kvstore.snapshot.SnapshotService8;
@@ -36,7 +37,7 @@ public class KVController {
 
     private Lock lock = new ReentrantLock();
     private KVStore store = new KVStore();
-    private WALInterface wal = new WalService9(lock);
+    private WALInterface wal = new WalService11(lock);
     private SnapshotService8 snapshotService8 = new SnapshotService8(lock, wal, store);
     ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
 
