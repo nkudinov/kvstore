@@ -10,7 +10,9 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.Map;
 import java.util.concurrent.locks.Lock;
+import lombok.extern.slf4j.Slf4j;
 
+@Slf4j
 public class SimpleSnapshotService11 {
     public static final String SNAPSHOT_TMP = "snapshot.tmp";
     public static final String SNAPSHOT_LOG = "snapshot.log";
