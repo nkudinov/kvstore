@@ -1,8 +1,13 @@
 package com.zalando.de.kvstore.snapshot;
 
+import com.zalando.de.kvstore.core.KVEntity;
 import com.zalando.de.kvstore.core.KVStore;
 import com.zalando.de.kvstore.service.WALInterface;
+import java.io.DataInputStream;
 import java.io.DataOutputStream;
+import java.io.EOFException;
+import java.io.FileInputStream;
+import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -46,4 +51,33 @@ public class SnapshotService9 {
             StandardCopyOption.REPLACE_EXISTING);
     }
 
+    public void restoreFromSnaphot() throws IOException {
+        lock.lock();
+        try {
+            long walOffset = 0;
+            try (DataInputStream input = new DataInputStream(new FileInputStream(SNAPSHOT_LOG))) {
+                walOffset = input.readLong();
+                while (true) {
+                    try {
+                        if (input.readInt() != MAGIC_NUMBER) {
+                            throw new IllegalStateException("Corrupted snapshot file: missing magic number");
+                        }
+                        String key = input.readUTF();
+                        String val = input.readUTF();
+                        kvStore.put(key, val);
+                    } catch (EOFException e) {
+                        break; // done reading snapshot
+                    }
+                }
+            }
+
+            // Replay WAL after the snapshot offset
+            for (KVEntity kvEntity : walInterface.recover()) {
+                kvStore.put(kvEntity);
+            }
+
+        } finally {
+            lock.unlock();
+        }
+    }
 }
