@@ -103,11 +103,11 @@ public class WalService13 implements WALInterface {
         return crc32.getValue();
     }
 
-    public WalService13() throws FileNotFoundException {
+    public WalService13(Lock lock) throws FileNotFoundException {
         buffer = new ArrayBlockingQueue<>(1000);
         isRunning = new AtomicBoolean(true);
         raf = new RandomAccessFile(WAL_LOG, "rw");
-        lock = new ReentrantLock();
+        this.lock = lock;
         worker = new Worker();
         worker.start();
     }
@@ -124,6 +124,7 @@ public class WalService13 implements WALInterface {
     public void shutdown() throws IOException {
         isRunning.set(false);
         worker.interrupt();
+        raf.close();
         try {
             worker.join();
         } catch (InterruptedException e) {

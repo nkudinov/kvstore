@@ -12,8 +12,10 @@ import com.zalando.de.kvstore.service.WALService7;
 import com.zalando.de.kvstore.service.WALService8;
 import com.zalando.de.kvstore.service.WalService11;
 import com.zalando.de.kvstore.service.WalService12;
+import com.zalando.de.kvstore.service.WalService13;
 import com.zalando.de.kvstore.service.WalService6;
 import com.zalando.de.kvstore.service.WalService9;
+import com.zalando.de.kvstore.snapshot.SimpleSnapsnotService13;
 import com.zalando.de.kvstore.snapshot.SnapshotService8;
 import com.zalando.de.kvstore.snapshot.SnapshotService9;
 import java.io.IOException;
@@ -39,8 +41,8 @@ public class KVController {
 
     private Lock lock = new ReentrantLock();
     private KVStore store = new KVStore();
-    private WALInterface wal = new WalService12(lock);
-    private SnapshotService9 snapshotService8 = new SnapshotService9(lock, wal, store);
+    private WALInterface wal = new WalService13(lock);
+    private SimpleSnapsnotService13 snapshotService8 = new SimpleSnapsnotService13(lock, wal, store);
     ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
 
     public KVController() throws IOException {
