@@ -80,6 +80,7 @@ public class WalService14 implements WALInterface {
             dataOutputStream.writeUTF(walEntry.key);
             dataOutputStream.writeUTF(walEntry.val);
             dataOutputStream.writeLong(crc32(walEntry.key, walEntry.val));
+
             fileChannel.write(ByteBuffer.wrap(byteArrayOutputStream.toByteArray()));
             fileChannel.force(true);
         }
@@ -124,6 +125,7 @@ public class WalService14 implements WALInterface {
         worker.interrupt();
         try {
             worker.join();
+            fileChannel.close();
         } catch (InterruptedException e) {
             throw new RuntimeException(e);
         }
@@ -153,7 +155,7 @@ public class WalService14 implements WALInterface {
                 }
             }
         } catch (EOFException e) {
-
+            log.info("Reached EOF during WAL recovery.");
         }
         return res;
     }
