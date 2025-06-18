@@ -2,7 +2,9 @@ package com.zalando.de.kvstore.service;
 
 import com.zalando.de.kvstore.core.KVEntity;
 import java.io.ByteArrayOutputStream;
+import java.io.DataInputStream;
 import java.io.DataOutputStream;
+import java.io.EOFException;
 import java.io.File;
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -11,6 +13,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardOpenOption;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CompletableFuture;
@@ -69,8 +72,10 @@ public class WalService15 implements WALInterface {
     }
 
     private void writeIntoFile(String key, String value) throws IOException {
+        lock.lock();
         try (ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
             DataOutputStream dataOutputStream = new DataOutputStream(byteArrayOutputStream)) {
+
             dataOutputStream.writeInt(0xCAFEBABE);
             dataOutputStream.writeUTF(key);
             dataOutputStream.writeUTF(value);
@@ -78,6 +83,8 @@ public class WalService15 implements WALInterface {
 
             fileChannel.write(ByteBuffer.wrap(byteArrayOutputStream.toByteArray()));
             fileChannel.force(true);
+        } finally {
+            lock.unlock();
         }
     }
 
@@ -105,7 +112,13 @@ public class WalService15 implements WALInterface {
 
     @Override
     public Future<Void> write(String key, String val) throws IOException {
-        return null;
+        WALEntry walEntry = new WALEntry(key, val);
+        try {
+            queue.put(walEntry);
+        } catch (InterruptedException e) {
+            throw new RuntimeException(e);
+        }
+        return walEntry.future;
     }
 
     @Override
@@ -115,7 +128,23 @@ public class WalService15 implements WALInterface {
 
     @Override
     public List<KVEntity> recover() throws IOException {
-        return List.of();
+        List<KVEntity> kvEntities = new ArrayList<>();
+        try (DataInputStream dataInputStream = new DataInputStream(Files.newInputStream(Path.of(WAL_LOG)))) {
+            while (true) {
+                if (dataInputStream.readInt() == 0xCAFEBABE) {
+                    System.out.println("skip for now");
+                }
+                String key = dataInputStream.readUTF();
+                String value = dataInputStream.readUTF();
+                long crc32 = dataInputStream.readLong();
+                if (crc32 == crc32(key, value)) {
+                    kvEntities.add(KVEntity.builder().key(key).val(value).build());
+                }
+            }
+        } catch (EOFException e) {
+
+        }
+        return kvEntities;
     }
 
     @Override
