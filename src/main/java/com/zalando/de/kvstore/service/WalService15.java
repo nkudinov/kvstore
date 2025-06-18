@@ -26,83 +26,80 @@ import java.util.zip.CRC32;
 
 public class WalService15 implements WALInterface {
 
-    public static final String WAL_LOG = "wal.log";
+    private static final String WAL_LOG = "wal.log";
+    private static final int MAGIC_HEADER = 0xCAFEBABE;
 
     private final FileChannel fileChannel;
-
     private final Lock lock;
+    private final BlockingQueue<WALEntry> queue = new LinkedBlockingQueue<>();
+    private final AtomicBoolean isRunning = new AtomicBoolean(true);
+    private final Thread worker;
 
-    private class WALEntry {
+    private static class WALEntry {
+        final String key;
+        final String value;
+        final CompletableFuture<Void> future = new CompletableFuture<>();
 
-        private String key;
-        private String value;
-        private CompletableFuture<Void> future;
-
-        public WALEntry(String key, String value) {
+        WALEntry(String key, String value) {
             this.key = key;
             this.value = value;
-            this.future = new CompletableFuture<>();
         }
     }
 
-    private final BlockingQueue<WALEntry> queue;
+    public WalService15(Lock lock) {
+        this.lock = lock;
+        try {
+            this.fileChannel = FileChannel.open(
+                Paths.get(WAL_LOG),
+                StandardOpenOption.WRITE,
+                StandardOpenOption.CREATE,
+                StandardOpenOption.APPEND,
+                StandardOpenOption.SYNC
+            );
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to open WAL log file", e);
+        }
 
-    private final AtomicBoolean isRunning = new AtomicBoolean(false);
+        this.worker = new Thread(this::processEntries, "wal-worker-thread");
+        this.worker.start();
+    }
 
-    private class Worker extends Thread {
-
-        @Override
-        public void run() {
-            WALEntry walEntry = null;
-            while (isRunning.get() && !Thread.currentThread().isInterrupted()) {
-                try {
-                    walEntry = queue.poll(100, TimeUnit.MICROSECONDS);
-                    writeIntoFile(walEntry.key, walEntry.value);
-                    if (walEntry != null) {
-                        walEntry.future.complete(null);
-                    }
-                    walEntry = null;
-                } catch (Exception e) {
-                    if (walEntry != null) {
-                        walEntry.future.completeExceptionally(e);
-                    }
+    private void processEntries() {
+        while (isRunning.get() || !queue.isEmpty()) {
+            try {
+                WALEntry entry = queue.poll(100, TimeUnit.MILLISECONDS);
+                if (entry != null) {
+                    writeToFile(entry.key, entry.value);
+                    entry.future.complete(null);
                 }
+            } catch (Exception e) {
+                e.printStackTrace(); // Log error
             }
         }
     }
 
-    private void writeIntoFile(String key, String value) throws IOException {
+    private void writeToFile(String key, String value) throws IOException {
         lock.lock();
-        try (ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
-            DataOutputStream dataOutputStream = new DataOutputStream(byteArrayOutputStream)) {
+        try (ByteArrayOutputStream baos = new ByteArrayOutputStream();
+            DataOutputStream dos = new DataOutputStream(baos)) {
 
-            dataOutputStream.writeInt(0xCAFEBABE);
-            dataOutputStream.writeUTF(key);
-            dataOutputStream.writeUTF(value);
-            dataOutputStream.writeLong(crc32(key, value));
+            dos.writeInt(MAGIC_HEADER);
+            dos.writeUTF(key);
+            dos.writeUTF(value);
+            dos.writeLong(calculateCRC32(key, value));
 
-            fileChannel.write(ByteBuffer.wrap(byteArrayOutputStream.toByteArray()));
+            fileChannel.write(ByteBuffer.wrap(baos.toByteArray()));
             fileChannel.force(true);
         } finally {
             lock.unlock();
         }
     }
 
-    private long crc32(String key, String value) {
-        CRC32 crc32 = new CRC32();
-        crc32.update(ByteBuffer.wrap(key.getBytes()));
-        crc32.update(ByteBuffer.wrap(value.getBytes()));
-        return crc32.getValue();
-    }
-
-    public WalService15(Lock lock) {
-        this.lock = lock;
-        try {
-            fileChannel = FileChannel.open(Paths.get(WAL_LOG), StandardOpenOption.WRITE, StandardOpenOption.SYNC);
-        } catch (IOException e) {
-            throw new RuntimeException(e);
-        }
-        queue = new LinkedBlockingQueue<>();
+    private long calculateCRC32(String key, String value) {
+        CRC32 crc = new CRC32();
+        crc.update(key.getBytes());
+        crc.update(value.getBytes());
+        return crc.getValue();
     }
 
     @Override
@@ -111,40 +108,56 @@ public class WalService15 implements WALInterface {
     }
 
     @Override
-    public Future<Void> write(String key, String val) throws IOException {
-        WALEntry walEntry = new WALEntry(key, val);
+    public Future<Void> write(String key, String val) {
+        WALEntry entry = new WALEntry(key, val);
         try {
-            queue.put(walEntry);
+            queue.put(entry);
         } catch (InterruptedException e) {
-            throw new RuntimeException(e);
+            Thread.currentThread().interrupt();
+            throw new RuntimeException("WAL write interrupted", e);
         }
-        return walEntry.future;
+        return entry.future;
     }
 
     @Override
     public void shutdown() throws IOException {
         isRunning.set(false);
+        worker.interrupt();
+        try {
+            worker.join();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+        fileChannel.close();
     }
 
     @Override
     public List<KVEntity> recover() throws IOException {
-        List<KVEntity> kvEntities = new ArrayList<>();
-        try (DataInputStream dataInputStream = new DataInputStream(Files.newInputStream(Path.of(WAL_LOG)))) {
+        List<KVEntity> entries = new ArrayList<>();
+        Path path = Path.of(WAL_LOG);
+
+        if (!Files.exists(path)) return entries;
+
+        try (DataInputStream dis = new DataInputStream(Files.newInputStream(path))) {
             while (true) {
-                if (dataInputStream.readInt() == 0xCAFEBABE) {
-                    System.out.println("skip for now");
-                }
-                String key = dataInputStream.readUTF();
-                String value = dataInputStream.readUTF();
-                long crc32 = dataInputStream.readLong();
-                if (crc32 == crc32(key, value)) {
-                    kvEntities.add(KVEntity.builder().key(key).val(value).build());
+                try {
+                    int magic = dis.readInt();
+                    if (magic != MAGIC_HEADER) break;
+
+                    String key = dis.readUTF();
+                    String value = dis.readUTF();
+                    long checksum = dis.readLong();
+
+                    if (checksum == calculateCRC32(key, value)) {
+                        entries.add(KVEntity.builder().key(key).val(value).build());
+                    }
+                } catch (EOFException e) {
+                    break; // Normal termination
                 }
             }
-        } catch (EOFException e) {
-
         }
-        return kvEntities;
+
+        return entries;
     }
 
     @Override
